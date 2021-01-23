@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/docker/go-plugins-helpers/network"
@@ -21,7 +22,7 @@ func run() error {
 	var socket = flag.String("socket", "wg", "where to create the unix socket")
 	flag.Parse()
 
-	fmt.Printf("Creating socket at %s\n", *socket)
+	log.Printf("Creating socket at %s\n", *socket)
 
 	stop := make(chan struct{})
 

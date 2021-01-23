@@ -2,6 +2,7 @@ package wg
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/docker/go-plugins-helpers/network"
 )

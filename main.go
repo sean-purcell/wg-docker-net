@@ -26,7 +26,7 @@ func run() error {
 
 	stop := make(chan struct{})
 
-	var driver = &wg.Driver{}
+	var driver = wg.NewDriver()
 	var handler = network.NewHandler(driver)
 	err := handler.ServeUnix(*socket, 0)
 	if err != nil {

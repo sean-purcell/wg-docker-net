@@ -6,22 +6,38 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/docker/go-plugins-helpers/network"
+	"github.com/vishvananda/netns"
 )
 
 type Driver struct {
-	network.Driver
+	networks map[string]*Network
+	rootNs   netns.NsHandle
 }
 
 func notSupported(method string) error {
 	return fmt.Errorf("[%v] not supported", method)
 }
+
 func logRequest(method string, request interface{}) {
 	str := spew.Sdump(request)
 	log.Printf("[%s] request: %s\n", method, str)
 }
 
+func NewDriver() *Driver {
+	return &Driver{
+		networks: make(map[string]*Network),
+	}
+}
+
 func (t *Driver) GetCapabilities() (*network.CapabilitiesResponse, error) {
 	logRequest("GetCapabilities", nil)
+
+	rootNs, err := netns.GetFromPid(1)
+	if err != nil {
+		return nil, err
+	}
+	t.rootNs = rootNs
+
 	response := &network.CapabilitiesResponse{
 		Scope:             network.LocalScope,
 		ConnectivityScope: network.LocalScope,
@@ -32,7 +48,19 @@ func (t *Driver) GetCapabilities() (*network.CapabilitiesResponse, error) {
 
 func (t *Driver) CreateNetwork(req *network.CreateNetworkRequest) error {
 	logRequest("CreateNetwork", req)
-	return notSupported("CreateNetwork")
+
+	if len(req.IPv4Data) > 1 || len(req.IPv6Data) > 0 {
+		return fmt.Errorf("Multiple ipv4 data or ipv6 data not supported")
+	}
+
+	options := req.Options["com.docker.network.generic"].(map[string]interface{})
+	network, err := CreateNetwork(req.IPv4Data[0], options)
+	if err != nil {
+		return err
+	}
+	t.networks[req.NetworkID] = network
+
+	return nil
 }
 
 func (t *Driver) AllocateNetwork(req *network.AllocateNetworkRequest) (*network.AllocateNetworkResponse, error) {

@@ -10,4 +10,5 @@ require (
 	github.com/vishvananda/netlink v1.1.0
 	github.com/vishvananda/netns v0.0.0-20210104183010-2eb08e3e575f
 	golang.org/x/net v0.0.0-20210119194325-5f4716e94777 // indirect
+	gopkg.in/go-ini/ini.v1 v1.62.0
 )

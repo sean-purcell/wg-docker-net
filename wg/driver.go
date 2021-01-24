@@ -54,7 +54,7 @@ func (t *Driver) CreateNetwork(req *network.CreateNetworkRequest) error {
 	}
 
 	options := req.Options["com.docker.network.generic"].(map[string]interface{})
-	network, err := CreateNetwork(req.IPv4Data[0], options)
+	network, err := CreateNetwork(req.IPv4Data[0], options, t.rootNs)
 	if err != nil {
 		return err
 	}
@@ -63,14 +63,22 @@ func (t *Driver) CreateNetwork(req *network.CreateNetworkRequest) error {
 	return nil
 }
 
+func (t *Driver) DeleteNetwork(req *network.DeleteNetworkRequest) error {
+	logRequest("DeleteNetwork", req)
+
+	id := req.NetworkID
+	net := t.networks[id]
+	if net == nil {
+		return fmt.Errorf("Network %s not found\n", id)
+	}
+	delete(t.networks, id)
+
+	return net.Delete()
+}
+
 func (t *Driver) AllocateNetwork(req *network.AllocateNetworkRequest) (*network.AllocateNetworkResponse, error) {
 	logRequest("AllocateNetwork", req)
 	return nil, notSupported("AllocateNetwork")
-}
-
-func (t *Driver) DeleteNetwork(req *network.DeleteNetworkRequest) error {
-	logRequest("DeleteNetwork", req)
-	return notSupported("DeleteNetwork")
 }
 
 func (t *Driver) FreeNetwork(req *network.FreeNetworkRequest) error {

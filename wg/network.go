@@ -58,10 +58,28 @@ func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootN
 			return nil, err
 		}
 	}
+	defer func() {
+		if err != nil {
+			err = deleteNs(ns, name)
+			if err != nil {
+				log.Printf("Failed to cleanup namespace: %v\n", err)
+			}
+		}
+	}()
 
 	log.Printf("Created namespace at fd %d\n", ns)
 
 	nl, err := netlink.NewHandleAt(ns)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			nl.Delete()
+		}
+	}()
+
+	err = conf.StartInterface()
 	if err != nil {
 		return nil, err
 	}
@@ -75,12 +93,20 @@ func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootN
 }
 
 func (t *Network) Delete() error {
-	if t.name != nil {
-		err := netns.DeleteNamed(*t.name)
+	t.nl.Delete()
+
+	err := deleteNs(t.ns, t.name)
+	return err
+}
+
+func deleteNs(handle netns.NsHandle, name *string) error {
+	if name != nil {
+		err := netns.DeleteNamed(*name)
 		if err != nil {
 			return err
 		}
 	}
 
-	return nil
+	err := handle.Close()
+	return err
 }

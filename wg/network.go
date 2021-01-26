@@ -175,7 +175,7 @@ func createOutboundLink(ns, rootNs netns.NsHandle, rootNl *netlink.Handle) error
 	veth := &netlink.Veth{
 		LinkAttrs: netlink.LinkAttrs{
 			Name:      "veth0",
-			Namespace: ns,
+			Namespace: netlink.NsFd(ns),
 		},
 		PeerName: publicName,
 	}

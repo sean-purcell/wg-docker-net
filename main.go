@@ -24,11 +24,14 @@ func run() error {
 
 	log.Printf("Creating socket at %s\n", *socket)
 
-	stop := make(chan struct{})
+	driver, err := wg.NewDriver()
+	if err != nil {
+		return err
+	}
 
-	var driver = wg.NewDriver()
-	var handler = network.NewHandler(driver)
-	err := handler.ServeUnix(*socket, 0)
+	stop := make(chan struct{})
+	handler := network.NewHandler(driver)
+	err = handler.ServeUnix(*socket, 0)
 	if err != nil {
 		return err
 	}

@@ -10,11 +10,17 @@ import (
 	"github.com/vishvananda/netns"
 )
 
+const (
+	LINK_PREFIX = "wgdocknet"
+)
+
 type Network struct {
-	ns   netns.NsHandle
-	nl   *netlink.Handle
-	name *string
-	conf *WgConfig
+	ns     netns.NsHandle
+	nl     *netlink.Handle
+	rootNs netns.NsHandle
+	rootNl *netlink.Handle
+	name   *string
+	conf   *WgConfig
 }
 
 func getOpt(options map[string]interface{}, name string) *string {
@@ -32,6 +38,11 @@ func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootN
 	var err error
 
 	confPath := getOpt(options, "wg.wgconf")
+
+	rootNl, err := netlink.NewHandleAt(rootNs)
+	if err != nil {
+		return nil, fmt.Errorf("Error getting handle of root namespace: %v", err)
+	}
 
 	if confPath == nil {
 		return nil, fmt.Errorf("Wireguard config file not present")
@@ -79,6 +90,13 @@ func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootN
 		}
 	}()
 
+	// TODO: Add a defer to bring this down if needed
+	err = createOutboundLink(ns, rootNs, rootNl)
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO: Add a defer to bring this down if needed
 	err = conf.StartInterface()
 	if err != nil {
 		return nil, err
@@ -87,6 +105,8 @@ func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootN
 	return &Network{
 		ns,
 		nl,
+		rootNs,
+		rootNl,
 		name,
 		conf,
 	}, nil
@@ -99,7 +119,7 @@ func (t *Network) Delete() error {
 	return err
 }
 
-func deleteNs(handle netns.NsHandle, name *string) error {
+func deleteNs(ns netns.NsHandle, name *string) error {
 	if name != nil {
 		err := netns.DeleteNamed(*name)
 		if err != nil {
@@ -107,6 +127,58 @@ func deleteNs(handle netns.NsHandle, name *string) error {
 		}
 	}
 
-	err := handle.Close()
+	err := ns.Close()
 	return err
+}
+
+func allLinkNames(nsHandle *netlink.Handle) ([]string, error) {
+	links, err := nsHandle.LinkList()
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(links))
+	for _, link := range links {
+		names = append(names, link.Attrs().Name)
+	}
+	return names, nil
+}
+
+func findUnusedLinkName(nsHandle *netlink.Handle) (string, error) {
+	names, err := allLinkNames(nsHandle)
+	if err != nil {
+		return "", err
+	}
+
+	nameSet := make(map[string]struct{})
+	for _, name := range names {
+		nameSet[name] = struct{}{}
+	}
+
+	for i := 0; true; i++ {
+		possibleName := fmt.Sprintf("%s%d", LINK_PREFIX, i)
+
+		_, exists := nameSet[possibleName]
+		if !exists {
+			return possibleName, nil
+		}
+	}
+
+	return "", fmt.Errorf("Impossible")
+}
+
+func createOutboundLink(ns, rootNs netns.NsHandle, rootNl *netlink.Handle) error {
+	publicName, err := findUnusedLinkName(rootNl)
+	if err != nil {
+		return err
+	}
+
+	veth := &netlink.Veth{
+		LinkAttrs: netlink.LinkAttrs{
+			Name:      "veth0",
+			Namespace: ns,
+		},
+		PeerName: publicName,
+	}
+
+	return rootNl.LinkAdd(veth)
 }

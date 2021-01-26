@@ -23,20 +23,21 @@ func logRequest(method string, request interface{}) {
 	log.Printf("[%s] request: %s\n", method, str)
 }
 
-func NewDriver() *Driver {
+func NewDriver() (*Driver, error) {
+	rootNs, err := netns.GetFromPid(1)
+	if err != nil {
+		return nil, fmt.Errorf("Error getting root namespace: %v", err)
+	}
+	log.Printf("Got root namespace at fd %d\n", rootNs)
+
 	return &Driver{
 		networks: make(map[string]*Network),
-	}
+		rootNs:   rootNs,
+	}, nil
 }
 
 func (t *Driver) GetCapabilities() (*network.CapabilitiesResponse, error) {
 	logRequest("GetCapabilities", nil)
-
-	rootNs, err := netns.GetFromPid(1)
-	if err != nil {
-		return nil, err
-	}
-	t.rootNs = rootNs
 
 	response := &network.CapabilitiesResponse{
 		Scope:             network.LocalScope,

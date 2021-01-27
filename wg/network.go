@@ -3,6 +3,7 @@ package wg
 import (
 	"fmt"
 	"log"
+	"net"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/docker/go-plugins-helpers/network"
@@ -91,7 +92,7 @@ func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootN
 	}()
 
 	// TODO: Add a defer to bring this down if needed
-	err = createOutboundLink(ns, rootNs, rootNl)
+	err = createOutboundLink(ns, rootNs, nl, rootNl)
 	if err != nil {
 		return nil, err
 	}
@@ -166,19 +167,103 @@ func findUnusedLinkName(nsHandle *netlink.Handle) (string, error) {
 	return "", fmt.Errorf("Impossible")
 }
 
-func createOutboundLink(ns, rootNs netns.NsHandle, rootNl *netlink.Handle) error {
+func allLinkNets(nsHandle *netlink.Handle) ([]net.IPNet, error) {
+	addrs, err := nsHandle.AddrList(nil, 0)
+	if err != nil {
+		return nil, err
+	}
+	nets := make([]net.IPNet, 0)
+	for _, addr := range addrs {
+		nets = append(nets, *(addr.IPNet))
+	}
+	return nets, nil
+}
+
+func checkUnused(addr net.IP, used []net.IPNet) bool {
+	for _, net := range used {
+		if net.Contains(addr) {
+			return false
+		}
+	}
+	return true
+}
+
+// Use 17.31.X.X.  Maybe this should be configurable later but this is fine for now.
+func findUnusedAddresses(nsHandle *netlink.Handle) (net.IP, net.IP, error) {
+	nets, err := allLinkNets(nsHandle)
+	if err != nil {
+		return nil, nil, err
+	}
+	for i := 0; i < 65536; i += 2 {
+		ip1 := net.IPv4(172, 31, byte(i/256), byte(i%256))
+		ip2 := net.IPv4(172, 31, byte(i/256), byte((i%256)+1))
+
+		if checkUnused(ip1, nets) && checkUnused(ip2, nets) {
+			return ip1, ip2, nil
+		}
+	}
+	return nil, nil, fmt.Errorf("Unable to find unused address")
+}
+
+func createOutboundLink(ns, rootNs netns.NsHandle, nl, rootNl *netlink.Handle) error {
 	publicName, err := findUnusedLinkName(rootNl)
+	if err != nil {
+		return err
+	}
+
+	ip1, ip2, err := findUnusedAddresses(rootNl)
 	if err != nil {
 		return err
 	}
 
 	veth := &netlink.Veth{
 		LinkAttrs: netlink.LinkAttrs{
-			Name:      "veth0",
-			Namespace: netlink.NsFd(ns),
+			Name:      publicName,
+			Namespace: netlink.NsFd(rootNs),
 		},
-		PeerName: publicName,
+		PeerName: "veth0",
 	}
 
-	return rootNl.LinkAdd(veth)
+	// TODO: Add cleanup
+	err = nl.LinkAdd(veth)
+	if err != nil {
+		return err
+	}
+
+	mask := net.CIDRMask(31, 32)
+
+	outerAddr := &netlink.Addr{
+		IPNet: &net.IPNet{
+			IP:   ip1,
+			Mask: mask,
+		},
+	}
+	innerAddr := &netlink.Addr{
+		IPNet: &net.IPNet{
+			IP:   ip2,
+			Mask: mask,
+		},
+	}
+	err = rootNl.AddrAdd(veth, outerAddr)
+	if err != nil {
+		return err
+	}
+	err = rootNl.LinkSetUp(veth)
+	if err != nil {
+		return err
+	}
+	innerLink, err := nl.LinkByName("veth0")
+	if err != nil {
+		return err
+	}
+	err = nl.AddrAdd(innerLink, innerAddr)
+	if err != nil {
+		return err
+	}
+	err = nl.LinkSetUp(innerLink)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

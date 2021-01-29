@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strconv"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/docker/go-plugins-helpers/network"
@@ -38,7 +39,17 @@ func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootN
 	var ns netns.NsHandle
 	var err error
 
-	confPath := getOpt(options, "wg.wgconf")
+	var doCleanup bool
+	if val := getOpt(options, "cleanup"); val != nil {
+		doCleanup, err = strconv.ParseBool(*val)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		doCleanup = true
+	}
+
+	confPath := getOpt(options, "wgconf")
 
 	rootNl, err := netlink.NewHandleAt(rootNs)
 	if err != nil {
@@ -56,7 +67,7 @@ func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootN
 	str := spew.Sdump(*conf)
 	log.Printf("Loaded wireguard config: %s\n", str)
 
-	name := getOpt(options, "wg.namespace")
+	name := getOpt(options, "namespace")
 	if name != nil {
 		log.Printf("Creating namespace: %s\n", *name)
 		ns, err = netns.NewNamed(*name)
@@ -71,7 +82,7 @@ func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootN
 		}
 	}
 	defer func() {
-		if err != nil {
+		if err != nil && doCleanup {
 			err = deleteNs(ns, name)
 			if err != nil {
 				log.Printf("Failed to cleanup namespace: %v\n", err)
@@ -91,13 +102,11 @@ func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootN
 		}
 	}()
 
-	// TODO: Add a defer to bring this down if needed
 	err = createOutboundLink(ns, rootNs, nl, rootNl)
 	if err != nil {
 		return nil, err
 	}
 
-	// TODO: Add a defer to bring this down if needed
 	err = conf.StartInterface()
 	if err != nil {
 		return nil, err
@@ -224,7 +233,6 @@ func createOutboundLink(ns, rootNs netns.NsHandle, nl, rootNl *netlink.Handle) e
 		PeerName: "veth0",
 	}
 
-	// TODO: Add cleanup
 	err = nl.LinkAdd(veth)
 	if err != nil {
 		return err
@@ -263,6 +271,21 @@ func createOutboundLink(ns, rootNs netns.NsHandle, nl, rootNl *netlink.Handle) e
 	err = nl.LinkSetUp(innerLink)
 	if err != nil {
 		return err
+	}
+
+	route := &netlink.Route{
+		LinkIndex: innerLink.Attrs().Index,
+		Dst: &net.IPNet{
+			IP:   net.IPv4zero,
+			Mask: net.CIDRMask(0, 32),
+		},
+		Src:   ip2,
+		Gw:    ip1,
+		Scope: netlink.SCOPE_UNIVERSE,
+	}
+	err = nl.RouteAdd(route)
+	if err != nil {
+		return fmt.Errorf("Error adding route: %v", err)
 	}
 
 	return nil

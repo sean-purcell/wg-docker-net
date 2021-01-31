@@ -3,19 +3,21 @@ package wg
 import (
 	"fmt"
 	"log"
+	"net"
 	"os/exec"
 	"runtime"
 	"strings"
 
+	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
 	"gopkg.in/go-ini/ini.v1"
 )
 
 type WgConfig struct {
-	path          string
-	listenPort    uint
-	address       string
-	peerAddresses []string
+	Path       string
+	ListenPort uint
+	Net        *net.IPNet
+	PeerNets   []*net.IPNet
 }
 
 func ParseWgConfig(path string) (*WgConfig, error) {
@@ -33,7 +35,7 @@ func ParseWgConfig(path string) (*WgConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	listenPort, err := key.Uint()
+	ListenPort, err := key.Uint()
 	if err != nil {
 		return nil, err
 	}
@@ -42,14 +44,19 @@ func ParseWgConfig(path string) (*WgConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	address := key.String()
+
+	ip, Net, err := net.ParseCIDR(key.String())
+	Net.IP = ip
+	if err != nil {
+		return nil, err
+	}
 
 	sections, err := ini.SectionsByName("Peer")
 	if err != nil {
 		return nil, err
 	}
 	fmt.Printf("Num sections: %v\n", len(sections))
-	peerAddresses := make([]string, 0)
+	PeerNets := make([]*net.IPNet, 0)
 	for _, section := range sections {
 		key, err := section.GetKey("AllowedIPs")
 		if err != nil {
@@ -57,33 +64,49 @@ func ParseWgConfig(path string) (*WgConfig, error) {
 		}
 		fmt.Printf("AllowedIps: %s\n", key.Value())
 		for _, addr := range key.Strings(",") {
-			peerAddresses = append(peerAddresses, strings.TrimSpace(addr))
+			_, peerNet, err := net.ParseCIDR(strings.TrimSpace(addr))
+			if err != nil {
+				return nil, err
+			}
+			PeerNets = append(PeerNets, peerNet)
 		}
 	}
 
-	return &WgConfig{path, listenPort, address, peerAddresses}, nil
+	Path := path
+	return &WgConfig{Path, ListenPort, Net, PeerNets}, nil
 }
 
-func (t *WgConfig) StartInterface() error {
+func (t *WgConfig) StartInterface(nl *netlink.Handle) (netlink.Link, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
 	currentNs, err := netns.Get()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() {
 		netns.Set(currentNs)
 	}()
 
-	log.Printf("Bringing up wireguard interface at %s\n", t.path)
-	cmd := exec.Command("wg-quick", "up", t.path)
+	log.Printf("Bringing up wireguard interface at %s\n", t.Path)
+	cmd := exec.Command("wg-quick", "up", t.Path)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Command failed: %v\n", err)
-		return err
+		return nil, err
 	}
 	log.Printf("Output: %s\n", string(output))
 
-	return nil
+	links, err := nl.LinkList()
+	if err != nil {
+		return nil, fmt.Errorf("Failed to enumerate links %v", err)
+	}
+
+	for _, link := range links {
+		if link.Type() == "wireguard" {
+			return link, nil
+		}
+	}
+
+	return nil, fmt.Errorf("Wireguard interface not found")
 }

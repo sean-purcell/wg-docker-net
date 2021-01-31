@@ -17,12 +17,15 @@ const (
 )
 
 type Network struct {
-	ns     netns.NsHandle
-	nl     *netlink.Handle
-	rootNs netns.NsHandle
-	rootNl *netlink.Handle
-	name   *string
-	conf   *WgConfig
+	ns          netns.NsHandle
+	nl          *netlink.Handle
+	rootNs      netns.NsHandle
+	rootNl      *netlink.Handle
+	name        *string
+	conf        *WgConfig
+	bridge      *netlink.Bridge
+	bridgeNet   *net.IPNet
+	ipAllocator *IpAllocator
 }
 
 func getOpt(options map[string]interface{}, name string) *string {
@@ -107,10 +110,34 @@ func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootN
 		return nil, err
 	}
 
-	err = conf.StartInterface()
+	_, err = conf.StartInterface(nl)
 	if err != nil {
 		return nil, err
 	}
+
+	_, subnet, err := net.ParseCIDR(data.Pool)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to parse assigned pool")
+	}
+
+	ipAllocator := CreateIpAllocator(subnet)
+	ipAllocator.MarkUsed(conf.Net.IP)
+	log.Printf("Marking wireguard link address used: %v", conf.Net.IP)
+
+	bridgeAddr, err := ipAllocator.FindAddress()
+	if err != nil {
+		return nil, fmt.Errorf("Failed to find address for bridge: %v", err)
+	}
+
+	bridgeNet := &net.IPNet{
+		IP:   bridgeAddr,
+		Mask: subnet.Mask,
+	}
+	bridge, err := createBridge(nl, bridgeNet)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("Created bridge with subnet: %v", bridgeNet)
 
 	return &Network{
 		ns,
@@ -119,6 +146,9 @@ func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootN
 		rootNl,
 		name,
 		conf,
+		bridge,
+		bridgeNet,
+		ipAllocator,
 	}, nil
 }
 
@@ -289,4 +319,32 @@ func createOutboundLink(ns, rootNs netns.NsHandle, nl, rootNl *netlink.Handle) e
 	}
 
 	return nil
+}
+
+func createBridge(nl *netlink.Handle, net *net.IPNet) (*netlink.Bridge, error) {
+	bridge := &netlink.Bridge{
+		LinkAttrs: netlink.LinkAttrs{
+			Name: "br0",
+		},
+	}
+
+	err := nl.LinkAdd(bridge)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to add bridge: %v", err)
+	}
+
+	addr := &netlink.Addr{
+		IPNet: net,
+	}
+	err = nl.AddrAdd(bridge, addr)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to set address for bridge: %v", err)
+	}
+
+	err = nl.LinkSetUp(bridge)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to set bridge up: %v", err)
+	}
+
+	return bridge, nil
 }

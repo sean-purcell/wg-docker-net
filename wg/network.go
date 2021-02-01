@@ -26,6 +26,8 @@ type Network struct {
 	bridge      *netlink.Bridge
 	bridgeNet   *net.IPNet
 	ipAllocator *IpAllocator
+
+	endpoints map[string]*Endpoint
 }
 
 func getOpt(options map[string]interface{}, name string) *string {
@@ -139,6 +141,8 @@ func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootN
 	}
 	log.Printf("Created bridge with subnet: %v", bridgeNet)
 
+	endpoints := make(map[string]*Endpoint, 0)
+
 	return &Network{
 		ns,
 		nl,
@@ -149,6 +153,7 @@ func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootN
 		bridge,
 		bridgeNet,
 		ipAllocator,
+		endpoints,
 	}, nil
 }
 
@@ -157,6 +162,23 @@ func (t *Network) Delete() error {
 
 	err := deleteNs(t.ns, t.name)
 	return err
+}
+
+func (t *Network) CreateEndpoint(id string, intf *network.EndpointInterface) (*network.EndpointInterface, error) {
+	if _, ok := t.endpoints[id]; ok {
+		return nil, fmt.Errorf("Endpoint with this id already exists: %v", id)
+	}
+
+	endpoint, err := CreateEndpoint(intf, t.ipAllocator)
+	if err != nil {
+		return nil, err
+	}
+
+	response := endpoint.CreateEndpointResponse()
+
+	log.Printf("Created endpoint with details: %v", response)
+
+	return response, nil
 }
 
 func deleteNs(ns netns.NsHandle, name *string) error {

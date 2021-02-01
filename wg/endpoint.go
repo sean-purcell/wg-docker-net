@@ -8,20 +8,22 @@ import (
 )
 
 type Endpoint struct {
-	addr net.IP
+	addr *net.IPNet
 	mac  net.HardwareAddr
 }
 
 func CreateEndpoint(intf *network.EndpointInterface, ipAllocator *IpAllocator) (*Endpoint, error) {
-	var addr net.IP
+	var addr *net.IPNet
 	var mac net.HardwareAddr
 	var err error
 
-	if intf.Address != "" {
-		addr, _, err = net.ParseCIDR(intf.Address)
+	if false && intf.Address != "" {
+		var ipAddr net.IP
+		ipAddr, addr, err = net.ParseCIDR(intf.Address)
 		if err != nil {
 			return nil, err
 		}
+		addr.IP = ipAddr
 	} else {
 		addr, err = ipAllocator.FindAddress()
 		if err != nil {

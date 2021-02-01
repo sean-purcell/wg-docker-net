@@ -89,7 +89,17 @@ func (t *Driver) FreeNetwork(req *network.FreeNetworkRequest) error {
 
 func (t *Driver) CreateEndpoint(req *network.CreateEndpointRequest) (*network.CreateEndpointResponse, error) {
 	logRequest("CreateEndpoint", req)
-	return nil, notSupported("CreateEndpoint")
+
+	net := t.networks[req.NetworkID]
+	if net == nil {
+		return nil, fmt.Errorf("Network %s not found", req.NetworkID)
+	}
+
+	intf, err := net.CreateEndpoint(req.EndpointID, req.Interface)
+	if err != nil {
+		return nil, err
+	}
+	return &network.CreateEndpointResponse{intf}, nil
 }
 
 func (t *Driver) DeleteEndpoint(req *network.DeleteEndpointRequest) error {

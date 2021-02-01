@@ -126,15 +126,11 @@ func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootN
 	ipAllocator.MarkUsed(conf.Net.IP)
 	log.Printf("Marking wireguard link address used: %v", conf.Net.IP)
 
-	bridgeAddr, err := ipAllocator.FindAddress()
+	bridgeNet, err := ipAllocator.FindAddress()
 	if err != nil {
 		return nil, fmt.Errorf("Failed to find address for bridge: %v", err)
 	}
 
-	bridgeNet := &net.IPNet{
-		IP:   bridgeAddr,
-		Mask: subnet.Mask,
-	}
 	bridge, err := createBridge(nl, bridgeNet)
 	if err != nil {
 		return nil, err

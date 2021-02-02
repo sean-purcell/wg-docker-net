@@ -99,6 +99,12 @@ func (t *Driver) CreateEndpoint(req *network.CreateEndpointRequest) (*network.Cr
 	if err != nil {
 		return nil, err
 	}
+	if req.Interface.Address == intf.Address {
+		intf.Address = ""
+	}
+	if req.Interface.MacAddress == intf.MacAddress {
+		intf.MacAddress = ""
+	}
 	return &network.CreateEndpointResponse{intf}, nil
 }
 

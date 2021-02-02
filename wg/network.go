@@ -170,10 +170,47 @@ func (t *Network) CreateEndpoint(id string, intf *network.EndpointInterface) (*n
 		return nil, err
 	}
 
+	t.endpoints[id] = endpoint
+
 	response := endpoint.CreateEndpointResponse()
 
 	log.Printf("Created endpoint with details: %v", response)
 
+	return response, nil
+}
+
+func (t *Network) DeleteEndpoint(id string) error {
+	if _, ok := t.endpoints[id]; !ok {
+		return fmt.Errorf("Endpoint with this id not found: %v", id)
+	}
+
+	delete(t.endpoints, id)
+	return nil
+}
+
+func (t *Network) Join(endpointId string) (*network.JoinResponse, error) {
+	_, ok := t.endpoints[endpointId]
+	if !ok {
+		return nil, fmt.Errorf("Endpoint %s not found", endpointId)
+	}
+
+	linkName, err := createContainerLink(t.ns, t.rootNs, t.nl, t.rootNl, t.bridge)
+	if err != nil {
+		return nil, err
+	}
+
+	routes := t.conf.GetRoutes(t.bridgeNet.IP)
+
+	response := &network.JoinResponse{
+		InterfaceName: network.InterfaceName{
+			SrcName:   linkName,
+			DstPrefix: LINK_PREFIX,
+		},
+		StaticRoutes: routes,
+	}
+
+	str := spew.Sdump(*response)
+	log.Printf("Responding to join request: %s\n", str)
 	return response, nil
 }
 
@@ -201,7 +238,7 @@ func allLinkNames(nsHandle *netlink.Handle) ([]string, error) {
 	return names, nil
 }
 
-func findUnusedLinkName(nsHandle *netlink.Handle) (string, error) {
+func findUnusedLinkName(prefix string, nsHandle *netlink.Handle) (string, error) {
 	names, err := allLinkNames(nsHandle)
 	if err != nil {
 		return "", err
@@ -213,7 +250,7 @@ func findUnusedLinkName(nsHandle *netlink.Handle) (string, error) {
 	}
 
 	for i := 0; true; i++ {
-		possibleName := fmt.Sprintf("%s%d", LINK_PREFIX, i)
+		possibleName := fmt.Sprintf("%s%d", prefix, i)
 
 		_, exists := nameSet[possibleName]
 		if !exists {
@@ -263,7 +300,7 @@ func findUnusedAddresses(nsHandle *netlink.Handle) (net.IP, net.IP, error) {
 }
 
 func createOutboundLink(ns, rootNs netns.NsHandle, nl, rootNl *netlink.Handle) error {
-	publicName, err := findUnusedLinkName(rootNl)
+	publicName, err := findUnusedLinkName(LINK_PREFIX, rootNl)
 	if err != nil {
 		return err
 	}
@@ -337,6 +374,49 @@ func createOutboundLink(ns, rootNs netns.NsHandle, nl, rootNl *netlink.Handle) e
 	}
 
 	return nil
+}
+
+func createContainerLink(ns, rootNs netns.NsHandle, nl, rootNl *netlink.Handle, bridge *netlink.Bridge) (string, error) {
+	publicName, err := findUnusedLinkName(LINK_PREFIX, rootNl)
+	if err != nil {
+		return "", err
+	}
+	innerName, err := findUnusedLinkName("veth", nl)
+	if err != nil {
+		return "", err
+	}
+
+	veth := &netlink.Veth{
+		LinkAttrs: netlink.LinkAttrs{
+			Name:      publicName,
+			Namespace: netlink.NsFd(rootNs),
+		},
+		PeerName: innerName,
+	}
+
+	err = nl.LinkAdd(veth)
+	if err != nil {
+		return "", err
+	}
+
+	err = rootNl.LinkSetUp(veth)
+	if err != nil {
+		return "", err
+	}
+	innerLink, err := nl.LinkByName(innerName)
+	if err != nil {
+		return "", err
+	}
+	err = nl.LinkSetMaster(innerLink, bridge)
+	if err != nil {
+		return "", err
+	}
+	err = nl.LinkSetUp(innerLink)
+	if err != nil {
+		return "", err
+	}
+
+	return publicName, nil
 }
 
 func createBridge(nl *netlink.Handle, net *net.IPNet) (*netlink.Bridge, error) {

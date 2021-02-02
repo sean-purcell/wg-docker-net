@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/docker/go-plugins-helpers/network"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
 	"gopkg.in/go-ini/ini.v1"
@@ -109,4 +110,16 @@ func (t *WgConfig) StartInterface(nl *netlink.Handle) (netlink.Link, error) {
 	}
 
 	return nil, fmt.Errorf("Wireguard interface not found")
+}
+
+func (t *WgConfig) GetRoutes(gateway net.IP) []*network.StaticRoute {
+	routes := make([]*network.StaticRoute, len(t.PeerNets))
+	for i, peer := range t.PeerNets {
+		routes[i] = &network.StaticRoute{
+			Destination: peer.String(),
+			RouteType:   0,
+			NextHop:     gateway.String(),
+		}
+	}
+	return routes
 }

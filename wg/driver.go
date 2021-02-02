@@ -110,7 +110,12 @@ func (t *Driver) CreateEndpoint(req *network.CreateEndpointRequest) (*network.Cr
 
 func (t *Driver) DeleteEndpoint(req *network.DeleteEndpointRequest) error {
 	logRequest("DeleteEndpoint", req)
-	return notSupported("DeleteEndpoint")
+
+	net := t.networks[req.NetworkID]
+	if net == nil {
+		return fmt.Errorf("Network %s not found", req.NetworkID)
+	}
+	return net.DeleteEndpoint(req.EndpointID)
 }
 
 func (t *Driver) EndpointInfo(req *network.InfoRequest) (*network.InfoResponse, error) {
@@ -120,7 +125,13 @@ func (t *Driver) EndpointInfo(req *network.InfoRequest) (*network.InfoResponse, 
 
 func (t *Driver) Join(req *network.JoinRequest) (*network.JoinResponse, error) {
 	logRequest("Join", req)
-	return nil, notSupported("Join")
+
+	net := t.networks[req.NetworkID]
+	if net == nil {
+		return nil, fmt.Errorf("Network %s not found", req.NetworkID)
+	}
+	response, err := net.Join(req.EndpointID)
+	return response, err
 }
 
 func (t *Driver) Leave(req *network.LeaveRequest) error {

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/docker/go-plugins-helpers/network"
 
@@ -29,14 +31,27 @@ func run() error {
 		return err
 	}
 
-	stop := make(chan struct{})
+	stop := make(chan os.Signal, 1)
+	result := make(chan error, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+
 	handler := network.NewHandler(driver)
-	err = handler.ServeUnix(*socket, 0)
-	if err != nil {
-		return err
+	go func() {
+		err := handler.ServeUnix(*socket, 0)
+		result <- err
+	}()
+	log.Printf("Serving")
+
+	select {
+	case res := <-result:
+		err = res
+	case sig := <-stop:
+		err = fmt.Errorf("Received signal: %v", sig)
 	}
 
-	<-stop
-
-	return nil
+	delErr := driver.Delete()
+	if delErr != nil {
+		return fmt.Errorf("%v, failed to delete driver: %v", err, delErr)
+	}
+	return err
 }

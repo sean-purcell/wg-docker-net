@@ -12,6 +12,7 @@ import (
 type Driver struct {
 	networks map[string]*Network
 	rootNs   netns.NsHandle
+	iptables *Iptables
 }
 
 func notSupported(method string) error {
@@ -30,10 +31,32 @@ func NewDriver() (*Driver, error) {
 	}
 	log.Printf("Got root namespace at fd %d\n", rootNs)
 
+	iptables, err := CreateIptables()
+	if err != nil {
+		return nil, err
+	}
+
 	return &Driver{
 		networks: make(map[string]*Network),
 		rootNs:   rootNs,
+		iptables: iptables,
 	}, nil
+}
+
+func (t *Driver) Delete() error {
+	errs := make([]error, 0)
+	for _, net := range t.networks {
+		if err := net.Delete(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if err := t.iptables.Delete(); err != nil {
+		errs = append(errs, err)
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("Failed to cleanup: %v", errs)
+	}
+	return nil
 }
 
 func (t *Driver) GetCapabilities() (*network.CapabilitiesResponse, error) {

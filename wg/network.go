@@ -17,15 +17,18 @@ const (
 )
 
 type Network struct {
-	ns          netns.NsHandle
-	nl          *netlink.Handle
-	rootNs      netns.NsHandle
-	rootNl      *netlink.Handle
-	name        *string
-	conf        *WgConfig
-	bridge      *netlink.Bridge
-	bridgeNet   *net.IPNet
-	ipAllocator *IpAllocator
+	ns           netns.NsHandle
+	nl           *netlink.Handle
+	rootNs       netns.NsHandle
+	rootNl       *netlink.Handle
+	name         *string
+	conf         *WgConfig
+	bridge       *netlink.Bridge
+	bridgeNet    *net.IPNet
+	ipAllocator  *IpAllocator
+	endpoint     net.IP
+	outboundAddr net.IP
+	iptables     *Iptables
 
 	endpoints map[string]*Endpoint
 }
@@ -40,7 +43,7 @@ func getOpt(options map[string]interface{}, name string) *string {
 	}
 }
 
-func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootNs netns.NsHandle) (*Network, error) {
+func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootNs netns.NsHandle, iptables *Iptables) (*Network, error) {
 	var ns netns.NsHandle
 	var err error
 
@@ -55,6 +58,16 @@ func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootN
 	}
 
 	confPath := getOpt(options, "wgconf")
+
+	endpointAddr := getOpt(options, "endpoint")
+	if endpointAddr == nil {
+		return nil, fmt.Errorf("No endpoint address provided")
+	}
+
+	endpoint := net.ParseIP(*endpointAddr)
+	if endpoint == nil {
+		return nil, fmt.Errorf("Invalid endpoint address given: %s", *endpointAddr)
+	}
 
 	rootNl, err := netlink.NewHandleAt(rootNs)
 	if err != nil {
@@ -107,7 +120,7 @@ func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootN
 		}
 	}()
 
-	err = createOutboundLink(ns, rootNs, nl, rootNl)
+	outboundAddr, err := createOutboundLink(ns, rootNs, nl, rootNl)
 	if err != nil {
 		return nil, err
 	}
@@ -137,6 +150,13 @@ func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootN
 	}
 	log.Printf("Created bridge with subnet: %v", bridgeNet)
 
+	port := conf.ListenPort
+	err = iptables.SetupForwarding(rootNs, outboundAddr, endpoint, port)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("Setup iptables forwarding rules %v:%d <-> %v:%d", endpoint, port, outboundAddr, port)
+
 	endpoints := make(map[string]*Endpoint, 0)
 
 	return &Network{
@@ -149,6 +169,9 @@ func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootN
 		bridge,
 		bridgeNet,
 		ipAllocator,
+		endpoint,
+		outboundAddr,
+		iptables,
 		endpoints,
 	}, nil
 }
@@ -157,6 +180,11 @@ func (t *Network) Delete() error {
 	t.nl.Delete()
 
 	err := deleteNs(t.ns, t.name)
+	if err != nil {
+		return err
+	}
+
+	err = t.iptables.SetupForwarding(t.rootNs, t.outboundAddr, t.endpoint, t.conf.ListenPort)
 	return err
 }
 
@@ -299,15 +327,15 @@ func findUnusedAddresses(nsHandle *netlink.Handle) (net.IP, net.IP, error) {
 	return nil, nil, fmt.Errorf("Unable to find unused address")
 }
 
-func createOutboundLink(ns, rootNs netns.NsHandle, nl, rootNl *netlink.Handle) error {
+func createOutboundLink(ns, rootNs netns.NsHandle, nl, rootNl *netlink.Handle) (net.IP, error) {
 	publicName, err := findUnusedLinkName(LINK_PREFIX, rootNl)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	ip1, ip2, err := findUnusedAddresses(rootNl)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	veth := &netlink.Veth{
@@ -320,7 +348,7 @@ func createOutboundLink(ns, rootNs netns.NsHandle, nl, rootNl *netlink.Handle) e
 
 	err = nl.LinkAdd(veth)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	mask := net.CIDRMask(31, 32)
@@ -339,23 +367,23 @@ func createOutboundLink(ns, rootNs netns.NsHandle, nl, rootNl *netlink.Handle) e
 	}
 	err = rootNl.AddrAdd(veth, outerAddr)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	err = rootNl.LinkSetUp(veth)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	innerLink, err := nl.LinkByName("veth0")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	err = nl.AddrAdd(innerLink, innerAddr)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	err = nl.LinkSetUp(innerLink)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	route := &netlink.Route{
@@ -370,10 +398,10 @@ func createOutboundLink(ns, rootNs netns.NsHandle, nl, rootNl *netlink.Handle) e
 	}
 	err = nl.RouteAdd(route)
 	if err != nil {
-		return fmt.Errorf("Error adding route: %v", err)
+		return nil, fmt.Errorf("Error adding route: %v", err)
 	}
 
-	return nil
+	return ip2, nil
 }
 
 func createContainerLink(ns, rootNs netns.NsHandle, nl, rootNl *netlink.Handle, bridge *netlink.Bridge) (string, error) {

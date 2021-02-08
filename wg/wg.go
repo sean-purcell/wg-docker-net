@@ -89,6 +89,8 @@ func (t *WgConfig) StartInterface(nl *netlink.Handle) (netlink.Link, error) {
 		netns.Set(currentNs)
 	}()
 
+	// TODO: We should maybe set the netns here
+
 	log.Printf("Bringing up wireguard interface at %s\n", t.Path)
 	cmd := exec.Command("wg-quick", "up", t.Path)
 	output, err := cmd.CombinedOutput()

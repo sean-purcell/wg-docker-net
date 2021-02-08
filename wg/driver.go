@@ -78,7 +78,7 @@ func (t *Driver) CreateNetwork(req *network.CreateNetworkRequest) error {
 	}
 
 	options := req.Options["com.docker.network.generic"].(map[string]interface{})
-	network, err := CreateNetwork(req.IPv4Data[0], options, t.rootNs)
+	network, err := CreateNetwork(req.IPv4Data[0], options, t.rootNs, t.iptables)
 	if err != nil {
 		return err
 	}

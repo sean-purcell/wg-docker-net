@@ -42,6 +42,10 @@ func (t *IpAllocator) MarkUsed(ip net.IP) {
 	t.usedAddresses[bytesToUint(ip.To4())] = struct{}{}
 }
 
+func (t *IpAllocator) MarkUnused(ip net.IP) {
+	delete(t.usedAddresses, bytesToUint(ip.To4()))
+}
+
 func (t *IpAllocator) FindAddress() (*net.IPNet, error) {
 	// TODO: This doesn't work if the subnet borders the top of the ipv4 address space
 	for ; t.nextAddress < t.upperBound; t.nextAddress++ {

@@ -143,10 +143,10 @@ func (i *Iptables) SetupForwarding(ns netns.NsHandle, source, endpoint net.IP, p
 	if err := i.i.Insert(nat, post, 1, snatRule(source, endpoint, port)...); err != nil {
 		return err
 	}
-	if err := i.i.Append(filter, forward, forwardOutRule(source, port)...); err != nil {
+	if err := i.i.Insert(filter, forward, 1, forwardOutRule(source, port)...); err != nil {
 		return err
 	}
-	if err := i.i.Append(filter, forward, forwardInRule(source, port)...); err != nil {
+	if err := i.i.Insert(filter, forward, 1, forwardInRule(source, port)...); err != nil {
 		return err
 	}
 	return nil

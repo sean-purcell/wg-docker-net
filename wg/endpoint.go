@@ -8,8 +8,8 @@ import (
 )
 
 type Endpoint struct {
-	addr *net.IPNet
-	mac  net.HardwareAddr
+	Addr *net.IPNet
+	Mac  net.HardwareAddr
 }
 
 func CreateEndpoint(intf *network.EndpointInterface, ipAllocator *IpAllocator) (*Endpoint, error) {
@@ -17,7 +17,7 @@ func CreateEndpoint(intf *network.EndpointInterface, ipAllocator *IpAllocator) (
 	var mac net.HardwareAddr
 	var err error
 
-	if false && intf.Address != "" {
+	if intf.Address != "" {
 		var ipAddr net.IP
 		ipAddr, addr, err = net.ParseCIDR(intf.Address)
 		if err != nil {
@@ -50,7 +50,7 @@ func CreateEndpoint(intf *network.EndpointInterface, ipAllocator *IpAllocator) (
 
 func (t *Endpoint) CreateEndpointResponse() *network.EndpointInterface {
 	return &network.EndpointInterface{
-		Address:    t.addr.String(),
-		MacAddress: t.mac.String(),
+		Address:    t.Addr.String(),
+		MacAddress: t.Mac.String(),
 	}
 }

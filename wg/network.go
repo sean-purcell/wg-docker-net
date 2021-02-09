@@ -26,11 +26,12 @@ type Network struct {
 	bridge       *netlink.Bridge
 	bridgeNet    *net.IPNet
 	ipAllocator  *IpAllocator
-	endpoint     net.IP
+	wgEndpoint   net.IP
 	outboundAddr net.IP
 	iptables     *Iptables
 
-	endpoints map[string]*Endpoint
+	endpoints  map[string]*Endpoint
+	interfaces map[string]string
 }
 
 func getOpt(options map[string]interface{}, name string) *string {
@@ -59,14 +60,14 @@ func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootN
 
 	confPath := getOpt(options, "wgconf")
 
-	endpointAddr := getOpt(options, "endpoint")
-	if endpointAddr == nil {
+	wgEndpointAddr := getOpt(options, "endpoint")
+	if wgEndpointAddr == nil {
 		return nil, fmt.Errorf("No endpoint address provided")
 	}
 
-	endpoint := net.ParseIP(*endpointAddr)
-	if endpoint == nil {
-		return nil, fmt.Errorf("Invalid endpoint address given: %s", *endpointAddr)
+	wgEndpoint := net.ParseIP(*wgEndpointAddr)
+	if wgEndpoint == nil {
+		return nil, fmt.Errorf("Invalid endpoint address given: %s", *wgEndpointAddr)
 	}
 
 	rootNl, err := netlink.NewHandleAt(rootNs)
@@ -151,13 +152,14 @@ func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootN
 	log.Printf("Created bridge with subnet: %v", bridgeNet)
 
 	port := conf.ListenPort
-	err = iptables.SetupForwarding(rootNs, outboundAddr, endpoint, port)
+	err = iptables.SetupForwarding(rootNs, outboundAddr, wgEndpoint, port)
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("Setup iptables forwarding rules %v:%d <-> %v:%d", endpoint, port, outboundAddr, port)
+	log.Printf("Setup iptables forwarding rules %v:%d <-> %v:%d", wgEndpoint, port, outboundAddr, port)
 
 	endpoints := make(map[string]*Endpoint, 0)
+	interfaces := make(map[string]string, 0)
 
 	return &Network{
 		ns,
@@ -169,10 +171,11 @@ func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootN
 		bridge,
 		bridgeNet,
 		ipAllocator,
-		endpoint,
+		wgEndpoint,
 		outboundAddr,
 		iptables,
 		endpoints,
+		interfaces,
 	}, nil
 }
 
@@ -184,7 +187,7 @@ func (t *Network) Delete() error {
 		return err
 	}
 
-	err = t.iptables.SetupForwarding(t.rootNs, t.outboundAddr, t.endpoint, t.conf.ListenPort)
+	err = t.iptables.RemoveForwarding(t.rootNs, t.outboundAddr, t.wgEndpoint, t.conf.ListenPort)
 	return err
 }
 
@@ -208,9 +211,12 @@ func (t *Network) CreateEndpoint(id string, intf *network.EndpointInterface) (*n
 }
 
 func (t *Network) DeleteEndpoint(id string) error {
-	if _, ok := t.endpoints[id]; !ok {
+	endpoint, ok := t.endpoints[id]
+	if !ok {
 		return fmt.Errorf("Endpoint with this id not found: %v", id)
 	}
+
+	t.ipAllocator.MarkUnused(endpoint.Addr.IP)
 
 	delete(t.endpoints, id)
 	return nil
@@ -222,16 +228,17 @@ func (t *Network) Join(endpointId string) (*network.JoinResponse, error) {
 		return nil, fmt.Errorf("Endpoint %s not found", endpointId)
 	}
 
-	linkName, err := createContainerLink(t.ns, t.rootNs, t.nl, t.rootNl, t.bridge)
+	publicLinkName, internalLinkName, err := createContainerLink(t.ns, t.rootNs, t.nl, t.rootNl, t.bridge)
 	if err != nil {
 		return nil, err
 	}
+	t.interfaces[endpointId] = internalLinkName
 
 	routes := t.conf.GetRoutes(t.bridgeNet.IP)
 
 	response := &network.JoinResponse{
 		InterfaceName: network.InterfaceName{
-			SrcName:   linkName,
+			SrcName:   publicLinkName,
 			DstPrefix: LINK_PREFIX,
 		},
 		StaticRoutes: routes,
@@ -240,6 +247,20 @@ func (t *Network) Join(endpointId string) (*network.JoinResponse, error) {
 	str := spew.Sdump(*response)
 	log.Printf("Responding to join request: %s\n", str)
 	return response, nil
+}
+
+func (t *Network) Leave(endpointId string) error {
+	interfaceName, ok := t.interfaces[endpointId]
+	if !ok {
+		return fmt.Errorf("Endpoint %s not found", endpointId)
+	}
+	delete(t.endpoints, endpointId)
+
+	link, err := t.nl.LinkByName(interfaceName)
+	if err != nil {
+		return fmt.Errorf("Failed to delete interface, interface not found")
+	}
+	return t.nl.LinkDel(link)
 }
 
 func deleteNs(ns netns.NsHandle, name *string) error {
@@ -404,14 +425,14 @@ func createOutboundLink(ns, rootNs netns.NsHandle, nl, rootNl *netlink.Handle) (
 	return ip2, nil
 }
 
-func createContainerLink(ns, rootNs netns.NsHandle, nl, rootNl *netlink.Handle, bridge *netlink.Bridge) (string, error) {
+func createContainerLink(ns, rootNs netns.NsHandle, nl, rootNl *netlink.Handle, bridge *netlink.Bridge) (string, string, error) {
 	publicName, err := findUnusedLinkName(LINK_PREFIX, rootNl)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	innerName, err := findUnusedLinkName("veth", nl)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	veth := &netlink.Veth{
@@ -424,27 +445,27 @@ func createContainerLink(ns, rootNs netns.NsHandle, nl, rootNl *netlink.Handle, 
 
 	err = nl.LinkAdd(veth)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	err = rootNl.LinkSetUp(veth)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	innerLink, err := nl.LinkByName(innerName)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	err = nl.LinkSetMaster(innerLink, bridge)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	err = nl.LinkSetUp(innerLink)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
-	return publicName, nil
+	return publicName, innerName, nil
 }
 
 func createBridge(nl *netlink.Handle, net *net.IPNet) (*netlink.Bridge, error) {

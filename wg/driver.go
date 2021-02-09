@@ -159,7 +159,7 @@ func (t *Driver) Join(req *network.JoinRequest) (*network.JoinResponse, error) {
 
 func (t *Driver) Leave(req *network.LeaveRequest) error {
 	logRequest("Leave", req)
-	return notSupported("Leave")
+	return nil
 }
 
 func (t *Driver) DiscoverNew(req *network.DiscoveryNotification) error {

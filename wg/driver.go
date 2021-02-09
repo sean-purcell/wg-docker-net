@@ -50,7 +50,7 @@ func (t *Driver) Delete() error {
 			errs = append(errs, err)
 		}
 	}
-	if err := t.iptables.Delete(); err != nil {
+	if err := t.iptables.Delete(t.rootNs); err != nil {
 		errs = append(errs, err)
 	}
 	if len(errs) > 0 {

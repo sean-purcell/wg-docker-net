@@ -91,7 +91,23 @@ func CreateIptables() (*Iptables, error) {
 	return i, nil
 }
 
-func (i *Iptables) Delete() error {
+func (i *Iptables) Delete(ns netns.NsHandle) error {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	currentNs, err := netns.Get()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		netns.Set(currentNs)
+	}()
+
+	err = netns.Set(ns)
+	if err != nil {
+		return err
+	}
+
 	if err := i.deleteChain(nat, source_pre, pre); err != nil {
 		return err
 	}

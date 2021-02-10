@@ -1,0 +1,12 @@
+[Unit]
+Description=Wireguard Docker Network Plugin
+Documentation=https://docs.docker.com
+Before=docker.service
+After=network-online.target wg-docker-net.socket
+Requires=wg-docker-net.socket docker.service
+
+[Service]
+ExecStart=/usr/local/bin/wg-docker-net
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,9 @@
+[Unit]
+Description=Wireguard Docker Network Plugin
+Documentation=https://docs.docker.com
+
+[Socket]
+ListenStream=/run/docker/plugins/wg.sock
+
+[Install]
+WantedBy=sockets.target

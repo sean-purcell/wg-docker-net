@@ -12,6 +12,10 @@ github.com/hashicorp/errwrap v1.0.0 h1:hLrqtEDnRye3+sgx6z4qVLNuviH3MR5aQ0ykNJa/U
 github.com/hashicorp/errwrap v1.0.0/go.mod h1:YH+1FKiLXxHSkmPseP+kNlulaMuP3n2brvKWEqk/Jc4=
 github.com/hashicorp/go-multierror v1.1.0 h1:B9UzwGQJehnUY1yNrnwREHc3fGbC2xefo8g4TbElacI=
 github.com/hashicorp/go-multierror v1.1.0/go.mod h1:spPvp8C1qA32ftKqdAHm4hHTbPw+vmowP0z+KUhOZdA=
+github.com/iburinoc/go-plugins-helpers v0.0.1 h1:Giwa8VywKR5I5HMponYcu3yiie+foF6qRPLaRe+fj9g=
+github.com/iburinoc/go-plugins-helpers v0.0.1/go.mod h1:8lDRuPQZzhde5ufCYcuEU9b+fdkrTB6BA3AoTAyVARU=
+github.com/iburinoc/go-plugins-helpers v0.0.2 h1:JctzDtw71T/mqQ4S/ulp0rZrd90VHYKnEUDBZ3GEZm0=
+github.com/iburinoc/go-plugins-helpers v0.0.2/go.mod h1:8lDRuPQZzhde5ufCYcuEU9b+fdkrTB6BA3AoTAyVARU=
 github.com/vishvananda/netlink v1.1.0 h1:1iyaYNBLmP6L0220aDnYQpo1QEV4t4hJ+xEEhhJH8j0=
 github.com/vishvananda/netlink v1.1.0/go.mod h1:cTgwzPIzzgDAYoQrMm0EdrjRUBkTqKYppBueQtXaqoE=
 github.com/vishvananda/netns v0.0.0-20191106174202-0a2b9b5464df/go.mod h1:JP3t17pCcGlemwknint6hfoeCVQrEMVwxRLRjXpq+BU=

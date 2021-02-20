@@ -101,6 +101,7 @@ func (i *Iptables) Delete(ns netns.NsHandle) error {
 	}
 	defer func() {
 		netns.Set(currentNs)
+		_ = currentNs.Close()
 	}()
 
 	err = netns.Set(ns)
@@ -146,6 +147,7 @@ func (i *Iptables) SetupForwarding(ns netns.NsHandle, source, endpoint net.IP, p
 	}
 	defer func() {
 		netns.Set(currentNs)
+		_ = currentNs.Close()
 	}()
 
 	err = netns.Set(ns)
@@ -178,6 +180,7 @@ func (i *Iptables) RemoveForwarding(ns netns.NsHandle, source, endpoint net.IP, 
 	}
 	defer func() {
 		netns.Set(currentNs)
+		_ = currentNs.Close()
 	}()
 
 	err = netns.Set(ns)

@@ -87,6 +87,7 @@ func (t *WgConfig) StartInterface(nl *netlink.Handle) (netlink.Link, error) {
 	}
 	defer func() {
 		netns.Set(currentNs)
+		_ = currentNs.Close()
 	}()
 
 	// TODO: We should maybe set the netns here

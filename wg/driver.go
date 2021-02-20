@@ -159,7 +159,12 @@ func (t *Driver) Join(req *network.JoinRequest) (*network.JoinResponse, error) {
 
 func (t *Driver) Leave(req *network.LeaveRequest) error {
 	logRequest("Leave", req)
-	return nil
+
+	net := t.networks[req.NetworkID]
+	if net == nil {
+		return fmt.Errorf("Network %s not found", req.NetworkID)
+	}
+	return net.Leave(req.EndpointID)
 }
 
 func (t *Driver) DiscoverNew(req *network.DiscoveryNotification) error {

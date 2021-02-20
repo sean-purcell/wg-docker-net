@@ -28,6 +28,7 @@ type Network struct {
 	ipAllocator  *IpAllocator
 	wgEndpoint   net.IP
 	outboundAddr net.IP
+	outboundIntf netlink.Link
 	iptables     *Iptables
 
 	endpoints  map[string]*Endpoint
@@ -121,7 +122,7 @@ func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootN
 		}
 	}()
 
-	outboundAddr, err := createOutboundLink(ns, rootNs, nl, rootNl)
+	outboundAddr, outboundIntf, err := createOutboundLink(ns, rootNs, nl, rootNl)
 	if err != nil {
 		return nil, err
 	}
@@ -173,6 +174,7 @@ func CreateNetwork(data *network.IPAMData, options map[string]interface{}, rootN
 		ipAllocator,
 		wgEndpoint,
 		outboundAddr,
+		outboundIntf,
 		iptables,
 		endpoints,
 		interfaces,
@@ -186,6 +188,12 @@ func (t *Network) Delete() error {
 	if err != nil {
 		return err
 	}
+
+	if err = t.rootNl.LinkDel(t.outboundIntf); err != nil {
+		return err
+	}
+
+	t.rootNl.Delete()
 
 	err = t.iptables.RemoveForwarding(t.rootNs, t.outboundAddr, t.wgEndpoint, t.conf.ListenPort)
 	return err
@@ -348,15 +356,15 @@ func findUnusedAddresses(nsHandle *netlink.Handle) (net.IP, net.IP, error) {
 	return nil, nil, fmt.Errorf("Unable to find unused address")
 }
 
-func createOutboundLink(ns, rootNs netns.NsHandle, nl, rootNl *netlink.Handle) (net.IP, error) {
+func createOutboundLink(ns, rootNs netns.NsHandle, nl, rootNl *netlink.Handle) (net.IP, netlink.Link, error) {
 	publicName, err := findUnusedLinkName(LINK_PREFIX, rootNl)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	ip1, ip2, err := findUnusedAddresses(rootNl)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	veth := &netlink.Veth{
@@ -369,7 +377,7 @@ func createOutboundLink(ns, rootNs netns.NsHandle, nl, rootNl *netlink.Handle) (
 
 	err = nl.LinkAdd(veth)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	mask := net.CIDRMask(31, 32)
@@ -388,23 +396,23 @@ func createOutboundLink(ns, rootNs netns.NsHandle, nl, rootNl *netlink.Handle) (
 	}
 	err = rootNl.AddrAdd(veth, outerAddr)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	err = rootNl.LinkSetUp(veth)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	innerLink, err := nl.LinkByName("veth0")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	err = nl.AddrAdd(innerLink, innerAddr)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	err = nl.LinkSetUp(innerLink)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	route := &netlink.Route{
@@ -419,10 +427,10 @@ func createOutboundLink(ns, rootNs netns.NsHandle, nl, rootNl *netlink.Handle) (
 	}
 	err = nl.RouteAdd(route)
 	if err != nil {
-		return nil, fmt.Errorf("Error adding route: %v", err)
+		return nil, nil, fmt.Errorf("Error adding route: %v", err)
 	}
 
-	return ip2, nil
+	return ip2, veth, nil
 }
 
 func createContainerLink(ns, rootNs netns.NsHandle, nl, rootNl *netlink.Handle, bridge *netlink.Bridge) (string, string, error) {
@@ -445,7 +453,7 @@ func createContainerLink(ns, rootNs netns.NsHandle, nl, rootNl *netlink.Handle, 
 
 	err = nl.LinkAdd(veth)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("Failed to create link (%s:%s) for container: %v", publicName, innerName, err)
 	}
 
 	err = rootNl.LinkSetUp(veth)

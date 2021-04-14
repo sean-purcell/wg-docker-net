@@ -143,7 +143,7 @@ func (t *Driver) DeleteEndpoint(req *network.DeleteEndpointRequest) error {
 
 func (t *Driver) EndpointInfo(req *network.InfoRequest) (*network.InfoResponse, error) {
 	logRequest("EndpointInfo", req)
-	return nil, notSupported("EndpointInfo")
+	return &network.InfoResponse{Value: make(map[string]string, 0)}, nil
 }
 
 func (t *Driver) Join(req *network.JoinRequest) (*network.JoinResponse, error) {
